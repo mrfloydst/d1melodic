@@ -1,0 +1,157 @@
+<html>
+    <head>
+        <title>Floyd's Donner D1 remapper</title>
+        <style>
+            
+            body {
+                font-family: Calibri, Arial, Helvetica, sans-serif;
+                background-color: var(--white);
+                overflow: hidden;
+                touch-action: none;
+            }
+            label {
+                display:inline-block;
+                vertical-align: top;
+                margin-right:10px;
+            }
+            div {
+                border:1px solid black;
+                padding:20px;
+                text-align: left;
+                width:50%;
+                max-width: 500px;
+                margin:50px auto;
+                box-shadow: 0 0 15px #333;
+            }
+        </style>
+    </head>
+    <body>
+        <div>
+            <h1>Donner D1 melodic sample playback</h1>
+            <p><b>Instructions:</b> put the same sample (tuned to C3, 440hz) on the S1-S4 slots of the Donner D1.<br>
+            Attach a MIDI keyboard and the D1 to a computer. Open this page in a browser and select the correct MIDI in/out port.<br>
+            Play some notes on the keyboard.</p>
+            <label>
+                <select size="5" class="navi" id="midi_input_device">
+                    <option>none</option>
+                </select><br>
+                Input<br>&nbsp;
+            </label>
+            <label>
+                <select size="5" class="navi" id="midi_output_device">
+                    <option>none</option>
+                </select><br>
+                Output
+            </label>
+        </div>
+        <script>
+            navigator.permissions.query({ name: "midi", sysex: true }).then((result) => {
+                if (result.state === "granted") {
+                    // Access granted.
+                } else if (result.state === "prompt") {
+                    // Using API will prompt for permission
+                }
+                    // Permission was denied by user prompt or permission policy
+            });
+            let midi = null;        // global MIDIAccess object
+            let midi_output=null;   // output device
+            let midi_input=null;    // input device
+            var channel=0;          // active channel
+            var notes=[44,45,46,47];
+            var transposers=[3,9,14,15];
+            var pitches=[0,0,0,0];
+            var notepointer=0;
+
+            function listInputsAndOutputs(midiAccess) {
+                for (const entry of midiAccess.inputs) {
+                    const input = entry[1];
+                    
+                    /** create options */
+                    document.getElementById("midi_input_device").appendChild(new Option(input.name,input.id));
+                }
+
+                for (const entry of midiAccess.outputs) {
+                    const output = entry[1];
+                    /** create options */
+                    document.getElementById("midi_output_device").appendChild(new Option(output.name,output.id));
+                }
+            }
+
+            function onMIDISuccess(midiAccess) {
+                midi = midiAccess; // store in the global (in real usage, would probably keep in an object instance)
+                for (const entry of midiAccess.outputs) {
+                    midi_output = entry[1];
+                }
+                for (const entry of midiAccess.inputs) {
+                    midi_input = entry[1];
+                }
+                listInputsAndOutputs(midiAccess);
+                /** event handler for midi device selector */
+                document.querySelectorAll("#midi_input_device,#midi_output_device").forEach(cb=>{
+                    cb.addEventListener("click",function(evt){
+                        switch(this.id) {
+                            case "midi_input_device":
+                                midi_input = midiAccess.inputs.get(this.options[this.selectedIndex].value);
+                                setupInputs();
+                                break;
+                            case "midi_output_device":
+                                midi_output = midiAccess.outputs.get(this.options[this.selectedIndex].value);
+                                break;
+                        }
+                    });
+                });
+                setupInputs();
+            }
+
+            function setupInputs() {
+                midi_input.onmidimessage = (msg) => {
+                    //  a note has been played
+                    if(msg.data[0]==144) {
+                        var octave=Math.floor(msg.data[1]/12);
+                        var pitch=msg.data[1]%12;
+                        var note=44+notepointer;
+                        var transpose=64+pitch;
+                        if(octave<5) {
+                            transpose=52+pitch;
+                        }
+                        if(octave>5) {
+                            transpose=76+pitch;
+                        }
+                        pitches[notepointer]=pitch;
+                        
+                        if(midi_input.name!=midi_output.name) {
+                            midi_output.send([msg.data[0],note,msg.data[2]]);
+                            sendCC(transposers[notepointer],transpose);
+                            notepointer++;
+                            if(notepointer==4) {
+                                notepointer=0;
+                            }
+                        }
+                    }
+                    if(msg.data[0]==128) {
+                        var off=pitches.indexOf(msg.data[1]%12);
+                        //console.log(notes[off]);
+                        //msg.data[1]=notes[off];
+                        //midi_output.send(msg.data);
+                    }
+                };
+            }
+            
+            function onMIDIFailure(msg) {
+                alert("Y U do dis :-(");
+                console.error(`Failed to get MIDI access - ${msg}`);
+            }
+
+            function sendCC(cc, val) {
+                /** the channel we send on is B0 + the channel selected by the user */
+                var sendchannel=parseInt("B0",16);
+                sendchannel="0x"+parseInt(parseInt(sendchannel)+parseInt(channel)).toString(16);
+                const noteOnMessage = [sendchannel, cc, val]; 
+                midi_output.send(noteOnMessage); // sends the message.
+            }
+
+            navigator.requestMIDIAccess({sysex:true}).then(onMIDISuccess, onMIDIFailure);
+
+        </script>
+    </body>
+</html>
